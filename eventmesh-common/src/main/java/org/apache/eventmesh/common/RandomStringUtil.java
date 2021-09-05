@@ -15,30 +15,17 @@
  * limitations under the License.
  */
 
-package org.apache.eventmesh.api.producer;
+package org.apache.eventmesh.common;
 
-import java.util.Properties;
+import org.apache.commons.text.RandomStringGenerator;
 
-import io.openmessaging.api.Message;
-import io.openmessaging.api.Producer;
-import io.openmessaging.api.SendCallback;
+public class RandomStringUtil {
 
-import org.apache.eventmesh.api.RRCallback;
-import org.apache.eventmesh.spi.EventMeshSPI;
+    private final static RandomStringGenerator randomNumGenerator = new RandomStringGenerator.Builder()
+            .withinRange('0', '9').build();
 
-@EventMeshSPI(isSingleton = false)
-public interface MeshMQProducer extends Producer {
-
-    void init(Properties properties) throws Exception;
-
-    void send(Message message, SendCallback sendCallback) throws Exception;
-
-    void request(Message message, RRCallback rrCallback, long timeout) throws Exception;
-
-    boolean reply(final Message message, final SendCallback sendCallback) throws Exception;
-
-    void checkTopicExist(String topic) throws Exception;
-
-    void setExtFields();
+    public static String generateNum(int length) {
+        return randomNumGenerator.generate(length);
+    }
 
 }
