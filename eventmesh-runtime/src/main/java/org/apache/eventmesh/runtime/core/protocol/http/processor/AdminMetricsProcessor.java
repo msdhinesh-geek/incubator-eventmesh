@@ -17,18 +17,17 @@
 
 package org.apache.eventmesh.runtime.core.protocol.http.processor;
 
-import io.netty.channel.ChannelHandlerContext;
-
-import org.apache.eventmesh.common.command.HttpCommand;
+import org.apache.eventmesh.common.protocol.http.HttpCommand;
 import org.apache.eventmesh.runtime.boot.EventMeshHTTPServer;
 import org.apache.eventmesh.runtime.core.protocol.http.async.AsyncContext;
 import org.apache.eventmesh.runtime.core.protocol.http.processor.inf.HttpRequestProcessor;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class AdminMetricsProcessor implements HttpRequestProcessor {
+import io.netty.channel.ChannelHandlerContext;
 
-    public Logger cmdLogger = LoggerFactory.getLogger("cmd");
+public class AdminMetricsProcessor implements HttpRequestProcessor {
 
     private EventMeshHTTPServer eventMeshHTTPServer;
 

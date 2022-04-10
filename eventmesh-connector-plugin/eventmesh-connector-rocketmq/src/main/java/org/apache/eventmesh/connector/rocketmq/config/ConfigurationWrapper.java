@@ -17,60 +17,55 @@
 
 package org.apache.eventmesh.connector.rocketmq.config;
 
+import org.apache.eventmesh.common.Constants;
+import org.apache.eventmesh.connector.rocketmq.common.EventMeshConstants;
+
+import org.apache.commons.lang3.StringUtils;
+
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.Properties;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
 
-import org.apache.commons.lang3.StringUtils;
-import org.apache.eventmesh.common.ThreadPoolFactory;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.experimental.UtilityClass;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
+@UtilityClass
 public class ConfigurationWrapper {
 
-    public Logger logger = LoggerFactory.getLogger(this.getClass());
+    private static final Properties properties = new Properties();
 
-    private String file;
-
-    private Properties properties = new Properties();
-
-    private boolean reload = true;
-
-    private ScheduledExecutorService configLoader = ThreadPoolFactory.createSingleScheduledExecutor("eventMesh-configloader-");
-
-    public ConfigurationWrapper(String file, boolean reload) {
-        this.file = file;
-        this.reload = reload;
-        init();
-    }
-
-    private void init() {
-        load();
-        if (this.reload) {
-            configLoader.scheduleAtFixedRate(new Runnable() {
-                @Override
-                public void run() {
-                    load();
-                }
-            }, 30 * 1000, 30 * 1000, TimeUnit.MILLISECONDS);
-        }
-    }
-
-    private void load() {
-        try {
-            logger.info("loading config: {}", file);
-            properties.load(new BufferedReader(new FileReader(
-                    new File(file))));
-        } catch (IOException e) {
-            logger.error("loading properties [{}] error", file, e);
-        }
+    static {
+        loadProperties();
     }
 
     public String getProp(String key) {
         return StringUtils.isEmpty(key) ? null : properties.getProperty(key, null);
+    }
+
+    /**
+     * Load rocketmq properties file from classpath and conf home.
+     * The properties defined in conf home will override classpath.
+     */
+    private void loadProperties() {
+        try (InputStream resourceAsStream = ConfigurationWrapper.class.getResourceAsStream(
+            File.separator + EventMeshConstants.EVENTMESH_CONF_FILE)) {
+            if (resourceAsStream != null) {
+                properties.load(resourceAsStream);
+            }
+        } catch (IOException e) {
+            throw new RuntimeException(String.format("Load %s.properties file from classpath error", EventMeshConstants.EVENTMESH_CONF_FILE));
+        }
+        try {
+            String configPath = Constants.EVENTMESH_CONF_HOME + File.separator + EventMeshConstants.EVENTMESH_CONF_FILE;
+            if (new File(configPath).exists()) {
+                properties.load(new BufferedReader(new FileReader(configPath)));
+            }
+        } catch (IOException e) {
+            throw new IllegalArgumentException(String.format("Cannot load %s file from conf", EventMeshConstants.EVENTMESH_CONF_FILE));
+        }
     }
 }

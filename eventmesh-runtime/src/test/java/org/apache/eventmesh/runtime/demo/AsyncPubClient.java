@@ -17,18 +17,18 @@
 
 package org.apache.eventmesh.runtime.demo;
 
-import io.netty.channel.ChannelHandlerContext;
-
-import org.apache.eventmesh.common.ThreadUtil;
 import org.apache.eventmesh.common.protocol.tcp.Package;
-
+import org.apache.eventmesh.common.utils.ThreadUtils;
 import org.apache.eventmesh.runtime.client.common.ClientConstants;
 import org.apache.eventmesh.runtime.client.common.MessageUtils;
 import org.apache.eventmesh.runtime.client.common.UserAgentUtils;
 import org.apache.eventmesh.runtime.client.hook.ReceiveMsgHook;
 import org.apache.eventmesh.runtime.client.impl.PubClientImpl;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import io.netty.channel.ChannelHandlerContext;
 
 public class AsyncPubClient {
 
@@ -46,7 +46,7 @@ public class AsyncPubClient {
         });
 
         for (int i = 0; i < 1; i++) {
-            ThreadUtil.randomSleep(0, 500);
+            ThreadUtils.randomSleep(0, 500);
             pubClient.broadcast(MessageUtils.asyncMessage(ClientConstants.ASYNC_TOPIC, i), 5000);
         }
     }

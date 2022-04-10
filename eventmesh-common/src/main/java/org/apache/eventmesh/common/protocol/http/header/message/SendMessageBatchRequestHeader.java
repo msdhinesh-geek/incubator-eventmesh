@@ -18,15 +18,16 @@
 package org.apache.eventmesh.common.protocol.http.header.message;
 
 
-import java.util.HashMap;
-import java.util.Map;
-
-import org.apache.commons.collections4.MapUtils;
-import org.apache.commons.lang3.StringUtils;
 import org.apache.eventmesh.common.Constants;
 import org.apache.eventmesh.common.protocol.http.common.ProtocolKey;
 import org.apache.eventmesh.common.protocol.http.common.ProtocolVersion;
 import org.apache.eventmesh.common.protocol.http.header.Header;
+
+import org.apache.commons.collections4.MapUtils;
+import org.apache.commons.lang3.StringUtils;
+
+import java.util.HashMap;
+import java.util.Map;
 
 public class SendMessageBatchRequestHeader extends Header {
 
@@ -38,6 +39,15 @@ public class SendMessageBatchRequestHeader extends Header {
 
     //protocol version adopted by requester, default:1.0
     private ProtocolVersion version;
+
+    //protocol type, cloudevents or eventmeshMessage
+    private String protocolType;
+
+    //protocol version, cloudevents:1.0 or 0.3
+    private String protocolVersion;
+
+    //protocol desc
+    private String protocolDesc;
 
     //the environment number of the requester
     private String env;
@@ -55,10 +65,10 @@ public class SendMessageBatchRequestHeader extends Header {
     private String ip;
 
     //USERNAME of the requester
-    private String username = "username";
+    private String username;
 
     //PASSWD of the requester
-    private String passwd = "user@123";
+    private String passwd;
 
     public String getUsername() {
         return username;
@@ -140,10 +150,37 @@ public class SendMessageBatchRequestHeader extends Header {
         this.ip = ip;
     }
 
+    public String getProtocolType() {
+        return protocolType;
+    }
+
+    public void setProtocolType(String protocolType) {
+        this.protocolType = protocolType;
+    }
+
+    public String getProtocolVersion() {
+        return protocolVersion;
+    }
+
+    public void setProtocolVersion(String protocolVersion) {
+        this.protocolVersion = protocolVersion;
+    }
+
+    public String getProtocolDesc() {
+        return protocolDesc;
+    }
+
+    public void setProtocolDesc(String protocolDesc) {
+        this.protocolDesc = protocolDesc;
+    }
+
     public static SendMessageBatchRequestHeader buildHeader(final Map<String, Object> headerParam) {
         SendMessageBatchRequestHeader header = new SendMessageBatchRequestHeader();
         header.setCode(MapUtils.getString(headerParam, ProtocolKey.REQUEST_CODE));
         header.setVersion(ProtocolVersion.get(MapUtils.getString(headerParam, ProtocolKey.VERSION)));
+        header.setProtocolType(MapUtils.getString(headerParam, ProtocolKey.PROTOCOL_TYPE));
+        header.setProtocolVersion(MapUtils.getString(headerParam, ProtocolKey.PROTOCOL_VERSION));
+        header.setProtocolDesc(MapUtils.getString(headerParam, ProtocolKey.PROTOCOL_DESC));
         String lan = StringUtils.isBlank(MapUtils.getString(headerParam, ProtocolKey.LANGUAGE))
                 ? Constants.LANGUAGE_JAVA : MapUtils.getString(headerParam, ProtocolKey.LANGUAGE);
         header.setLanguage(lan);

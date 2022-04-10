@@ -17,68 +17,46 @@
 
 package org.apache.eventmesh.connector.rocketmq.consumer;
 
-import java.io.File;
-import java.util.ArrayList;
+import org.apache.eventmesh.api.AbstractContext;
+import org.apache.eventmesh.api.EventListener;
+import org.apache.eventmesh.api.consumer.Consumer;
+import org.apache.eventmesh.connector.rocketmq.common.Constants;
+import org.apache.eventmesh.connector.rocketmq.config.ClientConfiguration;
+
+import org.apache.rocketmq.common.protocol.heartbeat.MessageModel;
+
 import java.util.List;
 import java.util.Properties;
 
-import io.openmessaging.api.AsyncGenericMessageListener;
-import io.openmessaging.api.AsyncMessageListener;
-import io.openmessaging.api.GenericMessageListener;
-import io.openmessaging.api.Message;
-import io.openmessaging.api.MessageListener;
-import io.openmessaging.api.MessageSelector;
-import io.openmessaging.api.MessagingAccessPoint;
-import io.openmessaging.api.OMS;
-import io.openmessaging.api.OMSBuiltinKeys;
-
-import org.apache.eventmesh.api.AbstractContext;
-import org.apache.eventmesh.api.consumer.MeshMQPushConsumer;
-import org.apache.eventmesh.connector.rocketmq.common.Constants;
-import org.apache.eventmesh.connector.rocketmq.common.EventMeshConstants;
-import org.apache.eventmesh.connector.rocketmq.config.ClientConfiguration;
-import org.apache.eventmesh.connector.rocketmq.config.ConfigurationWrapper;
-import org.apache.eventmesh.connector.rocketmq.patch.EventMeshConsumeConcurrentlyContext;
-import org.apache.eventmesh.connector.rocketmq.utils.OMSUtil;
-import org.apache.rocketmq.client.impl.consumer.ConsumeMessageConcurrentlyService;
-import org.apache.rocketmq.client.impl.consumer.ConsumeMessageService;
-import org.apache.rocketmq.common.message.MessageExt;
-import org.apache.rocketmq.common.protocol.heartbeat.MessageModel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class RocketMQConsumerImpl implements MeshMQPushConsumer {
+import io.cloudevents.CloudEvent;
 
-    public Logger logger = LoggerFactory.getLogger(this.getClass());
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
+public class RocketMQConsumerImpl implements Consumer {
 
     public Logger messageLogger = LoggerFactory.getLogger("message");
-
-    public final String DEFAULT_ACCESS_DRIVER = "org.apache.eventmesh.connector.rocketmq.MessagingAccessPointImpl";
 
     private PushConsumerImpl pushConsumer;
 
     @Override
     public synchronized void init(Properties keyValue) throws Exception {
-        ConfigurationWrapper configurationWrapper =
-                new ConfigurationWrapper(EventMeshConstants.EVENTMESH_CONF_HOME
-                        + File.separator
-                        + EventMeshConstants.EVENTMESH_CONF_FILE, false);
-        final ClientConfiguration clientConfiguration = new ClientConfiguration(configurationWrapper);
+        final ClientConfiguration clientConfiguration = new ClientConfiguration();
         clientConfiguration.init();
         boolean isBroadcast = Boolean.parseBoolean(keyValue.getProperty("isBroadcast"));
+
         String consumerGroup = keyValue.getProperty("consumerGroup");
-        String instanceName = keyValue.getProperty("instanceName");
-
-
         if (isBroadcast) {
             consumerGroup = Constants.BROADCAST_PREFIX + consumerGroup;
         }
 
-        String omsNamesrv = clientConfiguration.namesrvAddr;
-//        KeyValue properties = OMS.newKeyValue().put(OMSBuiltinKeys.DRIVER_IMPL, DEFAULT_ACCESS_DRIVER);
+        String namesrvAddr = clientConfiguration.namesrvAddr;
+        String instanceName = keyValue.getProperty("instanceName");
         Properties properties = new Properties();
-        properties.put(OMSBuiltinKeys.DRIVER_IMPL, DEFAULT_ACCESS_DRIVER);
-        properties.put("ACCESS_POINTS", omsNamesrv);
+        properties.put("ACCESS_POINTS", namesrvAddr);
         properties.put("REGION", "namespace");
         properties.put("instanceName", instanceName);
         properties.put("CONSUMER_ID", consumerGroup);
@@ -87,13 +65,13 @@ public class RocketMQConsumerImpl implements MeshMQPushConsumer {
         } else {
             properties.put("MESSAGE_MODEL", MessageModel.CLUSTERING.name());
         }
-        MessagingAccessPoint messagingAccessPoint = OMS.builder().build(properties);
-        pushConsumer = (PushConsumerImpl) messagingAccessPoint.createConsumer(properties);
+
+        pushConsumer = new PushConsumerImpl(properties);
     }
 
     @Override
-    public void subscribe(String topic, AsyncMessageListener listener) throws Exception {
-        pushConsumer.subscribe(topic, "*", listener);
+    public void subscribe(String topic) throws Exception {
+        pushConsumer.subscribe(topic, "*");
     }
 
     @Override
@@ -112,18 +90,18 @@ public class RocketMQConsumerImpl implements MeshMQPushConsumer {
     }
 
     @Override
-    public void updateOffset(List<Message> msgs, AbstractContext context) {
-        ConsumeMessageService consumeMessageService = pushConsumer.getRocketmqPushConsumer().getDefaultMQPushConsumerImpl().getConsumeMessageService();
-        List<MessageExt> msgExtList = new ArrayList<>(msgs.size());
-        for (Message msg : msgs) {
-            msgExtList.add(OMSUtil.msgConvertExt(msg));
-        }
-        ((ConsumeMessageConcurrentlyService) consumeMessageService).updateOffset(msgExtList, (EventMeshConsumeConcurrentlyContext) context);
+    public void updateOffset(List<CloudEvent> cloudEvents, AbstractContext context) {
+        pushConsumer.updateOffset(cloudEvents, context);
     }
 
     @Override
     public void unsubscribe(String topic) {
         pushConsumer.unsubscribe(topic);
+    }
+
+    @Override
+    public void registerEventListener(EventListener listener) {
+        pushConsumer.registerEventListener(listener);
     }
 
     @Override
@@ -135,48 +113,4 @@ public class RocketMQConsumerImpl implements MeshMQPushConsumer {
         return pushConsumer.attributes();
     }
 
-    @Override
-    public void subscribe(String topic, String subExpression, MessageListener listener) {
-        throw new UnsupportedOperationException("not supported yet");
-    }
-
-    @Override
-    public void subscribe(String topic, MessageSelector selector, MessageListener listener) {
-        throw new UnsupportedOperationException("not supported yet");
-    }
-
-    @Override
-    public <T> void subscribe(String topic, String subExpression, GenericMessageListener<T> listener) {
-        throw new UnsupportedOperationException("not supported yet");
-    }
-
-    @Override
-    public <T> void subscribe(String topic, MessageSelector selector, GenericMessageListener<T> listener) {
-        throw new UnsupportedOperationException("not supported yet");
-    }
-
-    @Override
-    public void subscribe(String topic, String subExpression, AsyncMessageListener listener) {
-        throw new UnsupportedOperationException("not supported yet");
-    }
-
-    @Override
-    public void subscribe(String topic, MessageSelector selector, AsyncMessageListener listener) {
-        throw new UnsupportedOperationException("not supported yet");
-    }
-
-    @Override
-    public <T> void subscribe(String topic, String subExpression, AsyncGenericMessageListener<T> listener) {
-        throw new UnsupportedOperationException("not supported yet");
-    }
-
-    @Override
-    public <T> void subscribe(String topic, MessageSelector selector, AsyncGenericMessageListener<T> listener) {
-        throw new UnsupportedOperationException("not supported yet");
-    }
-
-    @Override
-    public void updateCredential(Properties credentialProperties) {
-
-    }
 }

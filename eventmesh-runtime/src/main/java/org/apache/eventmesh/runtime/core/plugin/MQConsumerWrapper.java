@@ -17,23 +17,24 @@
 
 package org.apache.eventmesh.runtime.core.plugin;
 
+import org.apache.eventmesh.api.AbstractContext;
+import org.apache.eventmesh.api.EventListener;
+import org.apache.eventmesh.api.consumer.Consumer;
+import org.apache.eventmesh.api.factory.ConnectorPluginFactory;
+
 import java.util.List;
 import java.util.Properties;
 
-import io.openmessaging.api.AsyncMessageListener;
-import io.openmessaging.api.Message;
-
-import org.apache.eventmesh.api.AbstractContext;
-import org.apache.eventmesh.api.consumer.MeshMQPushConsumer;
-import org.apache.eventmesh.api.factory.ConnectorPluginFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.cloudevents.CloudEvent;
+
 public class MQConsumerWrapper extends MQWrapper {
 
-    public Logger logger = LoggerFactory.getLogger(this.getClass());
+    public final Logger logger = LoggerFactory.getLogger(this.getClass());
 
-    protected MeshMQPushConsumer meshMQPushConsumer;
+    protected Consumer meshMQPushConsumer;
 
     public MQConsumerWrapper(String connectorPluginType) {
         this.meshMQPushConsumer = ConnectorPluginFactory.getMeshMQPushConsumer(connectorPluginType);
@@ -43,8 +44,8 @@ public class MQConsumerWrapper extends MQWrapper {
         }
     }
 
-    public void subscribe(String topic, AsyncMessageListener listener) throws Exception {
-        meshMQPushConsumer.subscribe(topic, listener);
+    public void subscribe(String topic) throws Exception {
+        meshMQPushConsumer.subscribe(topic);
     }
 
     public void unsubscribe(String topic) throws Exception {
@@ -68,11 +69,11 @@ public class MQConsumerWrapper extends MQWrapper {
         started.compareAndSet(false, true);
     }
 
-//    public void registerMessageListener(MessageListenerConcurrently messageListenerConcurrently) {
-//        meshMQPushConsumer.registerMessageListener(messageListenerConcurrently);
-//    }
+    public void registerEventListener(EventListener listener) {
+        meshMQPushConsumer.registerEventListener(listener);
+    }
 
-    public void updateOffset(List<Message> msgs, AbstractContext eventMeshConsumeConcurrentlyContext) {
-        meshMQPushConsumer.updateOffset(msgs, eventMeshConsumeConcurrentlyContext);
+    public void updateOffset(List<CloudEvent> events, AbstractContext eventMeshConsumeConcurrentlyContext) {
+        meshMQPushConsumer.updateOffset(events, eventMeshConsumeConcurrentlyContext);
     }
 }

@@ -17,21 +17,14 @@
 
 package org.apache.eventmesh.runtime.core.protocol.http.consumer;
 
-import java.util.List;
-import java.util.Properties;
-import java.util.concurrent.atomic.AtomicBoolean;
-
-import io.openmessaging.api.AsyncConsumeContext;
-import io.openmessaging.api.AsyncMessageListener;
-import io.openmessaging.api.Message;
-import io.openmessaging.api.OnExceptionContext;
-import io.openmessaging.api.SendCallback;
-import io.openmessaging.api.SendResult;
-
-import org.apache.commons.collections4.MapUtils;
 import org.apache.eventmesh.api.AbstractContext;
+import org.apache.eventmesh.api.AsyncConsumeContext;
+import org.apache.eventmesh.api.EventListener;
 import org.apache.eventmesh.api.EventMeshAction;
 import org.apache.eventmesh.api.EventMeshAsyncConsumeContext;
+import org.apache.eventmesh.api.SendCallback;
+import org.apache.eventmesh.api.SendResult;
+import org.apache.eventmesh.api.exception.OnExceptionContext;
 import org.apache.eventmesh.common.Constants;
 import org.apache.eventmesh.common.protocol.SubscriptionItem;
 import org.apache.eventmesh.common.protocol.SubscriptionMode;
@@ -45,8 +38,18 @@ import org.apache.eventmesh.runtime.core.protocol.http.producer.SendMessageConte
 import org.apache.eventmesh.runtime.core.protocol.http.push.HTTPMessageHandler;
 import org.apache.eventmesh.runtime.core.protocol.http.push.MessageHandler;
 import org.apache.eventmesh.runtime.util.EventMeshUtil;
+
+import org.apache.commons.collections4.MapUtils;
+
+import java.util.List;
+import java.util.Properties;
+import java.util.concurrent.atomic.AtomicBoolean;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import io.cloudevents.CloudEvent;
+import io.cloudevents.core.builder.CloudEventBuilder;
 
 public class EventMeshConsumer {
 
@@ -89,7 +92,58 @@ public class EventMeshConsumer {
                 eventMeshHTTPServer.getEventMeshHttpConfiguration().eventMeshCluster));
         persistentMqConsumer.init(keyValue);
 
-        //
+        EventListener cluserEventListener = new EventListener() {
+            @Override
+            public void consume(CloudEvent event, AsyncConsumeContext context) {
+                String topic = event.getSubject();
+                String bizSeqNo = (String) event.getExtension(Constants.PROPERTY_MESSAGE_SEARCH_KEYS);
+                String uniqueId = (String) event.getExtension(Constants.RMB_UNIQ_ID);
+
+                event = CloudEventBuilder.from(event)
+                    .withExtension(EventMeshConstants.REQ_MQ2EVENTMESH_TIMESTAMP, String.valueOf(System.currentTimeMillis()))
+                    .build();
+                if (messageLogger.isDebugEnabled()) {
+                    messageLogger.debug("message|mq2eventMesh|topic={}|event={}", topic, event);
+                } else {
+                    messageLogger.info("message|mq2eventMesh|topic={}|bizSeqNo={}|uniqueId={}", topic, bizSeqNo, uniqueId);
+                }
+
+                ConsumerGroupTopicConf currentTopicConfig = MapUtils.getObject(consumerGroupConf.getConsumerGroupTopicConf(),
+                    topic, null);
+                EventMeshAsyncConsumeContext eventMeshAsyncConsumeContext = (EventMeshAsyncConsumeContext) context;
+
+                if (currentTopicConfig == null) {
+                    logger.error("no topicConfig found, consumerGroup:{} topic:{}", consumerGroupConf.getConsumerGroup(), topic);
+                    try {
+                        sendMessageBack(event, uniqueId, bizSeqNo);
+                        eventMeshAsyncConsumeContext.commit(EventMeshAction.CommitMessage);
+                        return;
+                    } catch (Exception ex) {
+                        //ignore
+                    }
+                }
+
+                SubscriptionItem subscriptionItem = consumerGroupConf.getConsumerGroupTopicConf().get(topic).getSubscriptionItem();
+                HandleMsgContext handleMsgContext = new HandleMsgContext(EventMeshUtil.buildPushMsgSeqNo(),
+                    consumerGroupConf.getConsumerGroup(), EventMeshConsumer.this,
+                    topic, event, subscriptionItem, eventMeshAsyncConsumeContext.getAbstractContext(),
+                    consumerGroupConf, eventMeshHTTPServer, bizSeqNo, uniqueId, currentTopicConfig);
+
+                if (httpMessageHandler.handle(handleMsgContext)) {
+                    eventMeshAsyncConsumeContext.commit(EventMeshAction.ManualAck);
+                } else {
+                    try {
+                        sendMessageBack(event, uniqueId, bizSeqNo);
+                    } catch (Exception e) {
+                        //ignore
+                    }
+                    eventMeshAsyncConsumeContext.commit(EventMeshAction.CommitMessage);
+                }
+            }
+        };
+        persistentMqConsumer.registerEventListener(cluserEventListener);
+
+        //broacast consumer
         Properties broadcastKeyValue = new Properties();
         broadcastKeyValue.put("isBroadcast", "true");
         broadcastKeyValue.put("consumerGroup", consumerGroupConf.getConsumerGroup());
@@ -97,6 +151,63 @@ public class EventMeshConsumer {
         broadcastKeyValue.put("instanceName", EventMeshUtil.buildMeshClientID(consumerGroupConf.getConsumerGroup(),
                 eventMeshHTTPServer.getEventMeshHttpConfiguration().eventMeshCluster));
         broadcastMqConsumer.init(broadcastKeyValue);
+
+        EventListener broadcastEventListener = new EventListener() {
+            @Override
+            public void consume(CloudEvent event, AsyncConsumeContext context) {
+
+                event = CloudEventBuilder.from(event)
+                    .withExtension(EventMeshConstants.REQ_MQ2EVENTMESH_TIMESTAMP,
+                        String.valueOf(System.currentTimeMillis()))
+                    .build();
+
+                String topic = event.getSubject();
+                String bizSeqNo = event.getExtension(Constants.PROPERTY_MESSAGE_SEARCH_KEYS).toString();
+                String uniqueId = event.getExtension(Constants.RMB_UNIQ_ID).toString();
+
+                if (messageLogger.isDebugEnabled()) {
+                    messageLogger.debug("message|mq2eventMesh|topic={}|msg={}", topic, event);
+                } else {
+                    messageLogger.info("message|mq2eventMesh|topic={}|bizSeqNo={}|uniqueId={}", topic, bizSeqNo,
+                        uniqueId);
+                }
+
+                ConsumerGroupTopicConf currentTopicConfig = MapUtils.getObject(
+                    consumerGroupConf.getConsumerGroupTopicConf(), topic, null);
+                EventMeshAsyncConsumeContext eventMeshAsyncConsumeContext = (EventMeshAsyncConsumeContext) context;
+
+                if (currentTopicConfig == null) {
+                    logger.error("no topicConfig found, consumerGroup:{} topic:{}",
+                        consumerGroupConf.getConsumerGroup(), topic);
+                    try {
+                        sendMessageBack(event, uniqueId, bizSeqNo);
+                        eventMeshAsyncConsumeContext.commit(EventMeshAction.CommitMessage);
+                        return;
+                    } catch (Exception ex) {
+                        //ignore
+                    }
+                }
+
+                SubscriptionItem subscriptionItem = consumerGroupConf.getConsumerGroupTopicConf().get(topic).getSubscriptionItem();
+                HandleMsgContext handleMsgContext = new HandleMsgContext(EventMeshUtil.buildPushMsgSeqNo(),
+                    consumerGroupConf.getConsumerGroup(), EventMeshConsumer.this,
+                    topic, event, subscriptionItem, eventMeshAsyncConsumeContext.getAbstractContext(),
+                    consumerGroupConf, eventMeshHTTPServer, bizSeqNo, uniqueId, currentTopicConfig);
+
+                if (httpMessageHandler.handle(handleMsgContext)) {
+                    eventMeshAsyncConsumeContext.commit(EventMeshAction.ManualAck);
+                } else {
+                    try {
+                        sendMessageBack(event, uniqueId, bizSeqNo);
+                    } catch (Exception e) {
+                        //ignore
+                    }
+                    eventMeshAsyncConsumeContext.commit(EventMeshAction.CommitMessage);
+                }
+            }
+        };
+        broadcastMqConsumer.registerEventListener(broadcastEventListener);
+
         inited4Persistent.compareAndSet(false, true);
         inited4Broadcast.compareAndSet(false, true);
         logger.info("EventMeshConsumer [{}] inited.............", consumerGroupConf.getConsumerGroup());
@@ -110,106 +221,10 @@ public class EventMeshConsumer {
     }
 
     public void subscribe(String topic, SubscriptionItem subscriptionItem) throws Exception {
-        AsyncMessageListener listener = null;
         if (!SubscriptionMode.BROADCASTING.equals(subscriptionItem.getMode())) {
-            listener = new AsyncMessageListener() {
-                @Override
-                public void consume(Message message, AsyncConsumeContext context) {
-                    String topic = message.getSystemProperties(Constants.PROPERTY_MESSAGE_DESTINATION);
-                    String bizSeqNo = message.getSystemProperties(Constants.PROPERTY_MESSAGE_SEARCH_KEYS);
-                    String uniqueId = message.getUserProperties(Constants.RMB_UNIQ_ID);
-
-                    message.getUserProperties().put(EventMeshConstants.REQ_MQ2EVENTMESH_TIMESTAMP, String.valueOf(System.currentTimeMillis()));
-                    if (messageLogger.isDebugEnabled()) {
-                        messageLogger.debug("message|mq2eventMesh|topic={}|msg={}", topic, message);
-                    } else {
-                        messageLogger.info("message|mq2eventMesh|topic={}|bizSeqNo={}|uniqueId={}", topic, bizSeqNo, uniqueId);
-                    }
-
-                    ConsumerGroupTopicConf currentTopicConfig = MapUtils.getObject(consumerGroupConf.getConsumerGroupTopicConf(), topic, null);
-                    EventMeshAsyncConsumeContext eventMeshAsyncConsumeContext = (EventMeshAsyncConsumeContext)context;
-
-                    if (currentTopicConfig == null) {
-                        logger.error("no topicConfig found, consumerGroup:{} topic:{}", consumerGroupConf.getConsumerGroup(), topic);
-                        try {
-                            sendMessageBack(message, uniqueId, bizSeqNo);
-//                            context.attributes().put(NonStandardKeys.MESSAGE_CONSUME_STATUS, EventMeshConsumeConcurrentlyStatus.CONSUME_SUCCESS.name());
-//                            context.ack();
-                            eventMeshAsyncConsumeContext.commit(EventMeshAction.CommitMessage);
-                            return;
-                        } catch (Exception ex) {
-                        }
-                    }
-                    HandleMsgContext handleMsgContext = new HandleMsgContext(EventMeshUtil.buildPushMsgSeqNo(), consumerGroupConf.getConsumerGroup(), EventMeshConsumer.this,
-                            topic, message, subscriptionItem, eventMeshAsyncConsumeContext.getAbstractContext(), consumerGroupConf, eventMeshHTTPServer, bizSeqNo, uniqueId, currentTopicConfig);
-
-                    if (httpMessageHandler.handle(handleMsgContext)) {
-//                        context.attributes().put(NonStandardKeys.MESSAGE_CONSUME_STATUS, EventMeshConsumeConcurrentlyStatus.CONSUME_FINISH.name());
-//                        context.ack();
-                        eventMeshAsyncConsumeContext.commit(EventMeshAction.ManualAck);
-                    } else {
-                        try {
-                            sendMessageBack(message, uniqueId, bizSeqNo);
-                        } catch (Exception e) {
-
-                        }
-//                        context.attributes().put(NonStandardKeys.MESSAGE_CONSUME_STATUS, EventMeshConsumeConcurrentlyStatus.CONSUME_SUCCESS.name());
-//                        context.ack();
-                        eventMeshAsyncConsumeContext.commit(EventMeshAction.CommitMessage);
-                    }
-                }
-            };
-            persistentMqConsumer.subscribe(topic, listener);
+            persistentMqConsumer.subscribe(topic);
         } else {
-            listener = new AsyncMessageListener() {
-                @Override
-                public void consume(Message message, AsyncConsumeContext context) {
-                    String topic = message.getSystemProperties(Constants.PROPERTY_MESSAGE_DESTINATION);
-                    String bizSeqNo = message.getSystemProperties(Constants.PROPERTY_MESSAGE_SEARCH_KEYS);
-                    String uniqueId = message.getUserProperties(Constants.RMB_UNIQ_ID);
-
-                    message.getUserProperties().put(EventMeshConstants.REQ_MQ2EVENTMESH_TIMESTAMP, String.valueOf(System.currentTimeMillis()));
-
-                    if (messageLogger.isDebugEnabled()) {
-                        messageLogger.debug("message|mq2eventMesh|topic={}|msg={}", topic, message);
-                    } else {
-                        messageLogger.info("message|mq2eventMesh|topic={}|bizSeqNo={}|uniqueId={}", topic, bizSeqNo, uniqueId);
-                    }
-
-                    ConsumerGroupTopicConf currentTopicConfig = MapUtils.getObject(consumerGroupConf.getConsumerGroupTopicConf(), topic, null);
-                    EventMeshAsyncConsumeContext eventMeshAsyncConsumeContext = (EventMeshAsyncConsumeContext)context;
-
-                    if (currentTopicConfig == null) {
-                        logger.error("no topicConfig found, consumerGroup:{} topic:{}", consumerGroupConf.getConsumerGroup(), topic);
-                        try {
-                            sendMessageBack(message, uniqueId, bizSeqNo);
-//                            context.attributes().put(NonStandardKeys.MESSAGE_CONSUME_STATUS, EventMeshConsumeConcurrentlyStatus.CONSUME_SUCCESS.name());
-//                            context.ack();
-                            eventMeshAsyncConsumeContext.commit(EventMeshAction.CommitMessage);
-                            return;
-                        } catch (Exception ex) {
-                        }
-                    }
-                    HandleMsgContext handleMsgContext = new HandleMsgContext(EventMeshUtil.buildPushMsgSeqNo(), consumerGroupConf.getConsumerGroup(), EventMeshConsumer.this,
-                            topic, message, subscriptionItem, eventMeshAsyncConsumeContext.getAbstractContext(), consumerGroupConf, eventMeshHTTPServer, bizSeqNo, uniqueId, currentTopicConfig);
-
-                    if (httpMessageHandler.handle(handleMsgContext)) {
-//                        context.attributes().put(NonStandardKeys.MESSAGE_CONSUME_STATUS, EventMeshConsumeConcurrentlyStatus.CONSUME_FINISH.name());
-//                        context.ack();
-                        eventMeshAsyncConsumeContext.commit(EventMeshAction.ManualAck);
-                    } else {
-                        try {
-                            sendMessageBack(message, uniqueId, bizSeqNo);
-                        } catch (Exception e) {
-
-                        }
-//                        context.attributes().put(NonStandardKeys.MESSAGE_CONSUME_STATUS, EventMeshConsumeConcurrentlyStatus.CONSUME_SUCCESS.name());
-//                        context.ack();
-                        eventMeshAsyncConsumeContext.commit(EventMeshAction.CommitMessage);
-                    }
-                }
-            };
-            broadcastMqConsumer.subscribe(topic, listener);
+            broadcastMqConsumer.subscribe(topic);
         }
     }
 
@@ -221,15 +236,6 @@ public class EventMeshConsumer {
         }
     }
 
-//    public boolean isPause() {
-//        return persistentMqConsumer.isPause() && broadcastMqConsumer.isPause();
-//    }
-//
-//    public void pause() {
-//        persistentMqConsumer.pause();
-//        broadcastMqConsumer.pause();
-//    }
-
     public synchronized void shutdown() throws Exception {
         persistentMqConsumer.shutdown();
         started4Persistent.compareAndSet(true, false);
@@ -237,11 +243,12 @@ public class EventMeshConsumer {
         started4Broadcast.compareAndSet(true, false);
     }
 
-    public void updateOffset(String topic, SubscriptionMode subscriptionMode, List<Message> msgs, AbstractContext context) {
+    public void updateOffset(String topic, SubscriptionMode subscriptionMode, List<CloudEvent> events,
+                             AbstractContext context) {
         if (SubscriptionMode.BROADCASTING.equals(subscriptionMode)) {
-            broadcastMqConsumer.updateOffset(msgs, context);
+            broadcastMqConsumer.updateOffset(events, context);
         } else {
-            persistentMqConsumer.updateOffset(msgs, context);
+            persistentMqConsumer.updateOffset(events, context);
         }
     }
 
@@ -253,17 +260,19 @@ public class EventMeshConsumer {
         return eventMeshHTTPServer;
     }
 
-    public void sendMessageBack(final Message msgBack, final String uniqueId, String bizSeqNo) throws Exception {
+    public void sendMessageBack(final CloudEvent event, final String uniqueId, String bizSeqNo) throws Exception {
 
         EventMeshProducer sendMessageBack
                 = eventMeshHTTPServer.getProducerManager().getEventMeshProducer(consumerGroupConf.getConsumerGroup());
 
         if (sendMessageBack == null) {
-            logger.warn("consumer:{} consume fail, sendMessageBack, bizSeqNo:{}, uniqueId:{}", consumerGroupConf.getConsumerGroup(), bizSeqNo, uniqueId);
+            logger.warn("consumer:{} consume fail, sendMessageBack, bizSeqNo:{}, uniqueId:{}",
+                    consumerGroupConf.getConsumerGroup(), bizSeqNo, uniqueId);
             return;
         }
 
-        final SendMessageContext sendMessageBackContext = new SendMessageContext(bizSeqNo, msgBack, sendMessageBack, eventMeshHTTPServer);
+        final SendMessageContext sendMessageBackContext = new SendMessageContext(bizSeqNo, event, sendMessageBack,
+                eventMeshHTTPServer);
 
         sendMessageBack.send(sendMessageBackContext, new SendCallback() {
             @Override
@@ -272,13 +281,9 @@ public class EventMeshConsumer {
 
             @Override
             public void onException(OnExceptionContext context) {
-                logger.warn("consumer:{} consume fail, sendMessageBack, bizSeqno:{}, uniqueId:{}", consumerGroupConf.getConsumerGroup(), bizSeqNo, uniqueId);
+                logger.warn("consumer:{} consume fail, sendMessageBack, bizSeqno:{}, uniqueId:{}",
+                        consumerGroupConf.getConsumerGroup(), bizSeqNo, uniqueId);
             }
-
-//            @Override
-//            public void onException(Throwable e) {
-//                logger.warn("consumer:{} consume fail, sendMessageBack, bizSeqno:{}, uniqueId:{}", consumerGroupConf.getConsumerGroup(), bizSeqNo, uniqueId);
-//            }
         });
     }
 }

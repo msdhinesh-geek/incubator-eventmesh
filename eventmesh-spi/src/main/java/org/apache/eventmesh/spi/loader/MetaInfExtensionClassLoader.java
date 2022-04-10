@@ -18,8 +18,6 @@
 package org.apache.eventmesh.spi.loader;
 
 import org.apache.eventmesh.spi.ExtensionException;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -29,6 +27,9 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Load extension from classpath
@@ -43,14 +44,14 @@ public class MetaInfExtensionClassLoader implements ExtensionClassLoader {
     private static final String EVENTMESH_EXTENSION_META_DIR = "META-INF/eventmesh/";
 
     @Override
-    public <T> Map<String, Class<?>> loadExtensionClass(Class<T> extensionType) {
+    public <T> Map<String, Class<?>> loadExtensionClass(Class<T> extensionType, String extensionInstanceName) {
         return EXTENSION_CLASS_CACHE.computeIfAbsent(extensionType, this::doLoadExtensionClass);
     }
 
     private <T> Map<String, Class<?>> doLoadExtensionClass(Class<T> extensionType) {
         Map<String, Class<?>> extensionMap = new HashMap<>();
         String extensionFileName = EVENTMESH_EXTENSION_META_DIR + extensionType.getName();
-        ClassLoader classLoader = MetaInfExtensionClassLoader.class.getClassLoader();
+        ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
         try {
             Enumeration<URL> extensionUrls = classLoader.getResources(extensionFileName);
             if (extensionUrls != null) {

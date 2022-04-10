@@ -17,17 +17,19 @@
 
 package org.apache.eventmesh.spi;
 
-import org.apache.commons.lang3.StringUtils;
 import org.apache.eventmesh.spi.loader.ExtensionClassLoader;
 import org.apache.eventmesh.spi.loader.JarExtensionClassLoader;
 import org.apache.eventmesh.spi.loader.MetaInfExtensionClassLoader;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+
+import org.apache.commons.lang3.StringUtils;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * The extension fetching factory, all extension plugins should be fetched by this factory.
@@ -72,16 +74,16 @@ public enum EventMeshExtensionFactory {
     }
 
     @SuppressWarnings("unchecked")
-    private static <T> T getSingletonExtension(Class<T> extensionType, String extensionName) {
-        return (T) EXTENSION_INSTANCE_CACHE.computeIfAbsent(extensionName, name -> {
-            Class<T> extensionInstanceClass = getExtensionClass(extensionType, extensionName);
+    private static <T> T getSingletonExtension(Class<T> extensionType, String extensionInstanceName) {
+        return (T) EXTENSION_INSTANCE_CACHE.computeIfAbsent(extensionInstanceName, name -> {
+            Class<T> extensionInstanceClass = getExtensionInstanceClass(extensionType, extensionInstanceName);
             try {
                 if (extensionInstanceClass == null) {
                     return null;
                 }
                 T extensionInstance = extensionInstanceClass.newInstance();
-                logger.info("initialize extension instance success, extensionType: {}, extensionName: {}",
-                        extensionType, extensionName);
+                logger.info("initialize extension instance success, extensionType: {}, extensionInstanceName: {}",
+                        extensionType, extensionInstanceName);
                 return extensionInstance;
             } catch (InstantiationException | IllegalAccessException e) {
                 throw new ExtensionException("Extension initialize error", e);
@@ -89,15 +91,15 @@ public enum EventMeshExtensionFactory {
         });
     }
 
-    private static <T> T getPrototypeExtension(Class<T> extensionType, String extensionName) {
-        Class<T> extensionInstanceClass = getExtensionClass(extensionType, extensionName);
+    private static <T> T getPrototypeExtension(Class<T> extensionType, String extensionInstanceName) {
+        Class<T> extensionInstanceClass = getExtensionInstanceClass(extensionType, extensionInstanceName);
         try {
             if (extensionInstanceClass == null) {
                 return null;
             }
             T extensionInstance = extensionInstanceClass.newInstance();
             logger.info("initialize extension instance success, extensionType: {}, extensionName: {}",
-                    extensionType, extensionName);
+                    extensionType, extensionInstanceName);
             return extensionInstance;
         } catch (InstantiationException | IllegalAccessException e) {
             throw new ExtensionException("Extension initialize error", e);
@@ -105,10 +107,10 @@ public enum EventMeshExtensionFactory {
     }
 
     @SuppressWarnings("unchecked")
-    private static <T> Class<T> getExtensionClass(Class<T> extensionType, String extensionName) {
+    private static <T> Class<T> getExtensionInstanceClass(Class<T> extensionType, String extensionInstanceName) {
         for (ExtensionClassLoader extensionClassLoader : extensionClassLoaders) {
-            Map<String, Class<?>> extensionClassMap = extensionClassLoader.loadExtensionClass(extensionType);
-            Class<?> instanceClass = extensionClassMap.get(extensionName);
+            Map<String, Class<?>> extensionInstanceClassMap = extensionClassLoader.loadExtensionClass(extensionType, extensionInstanceName);
+            Class<?> instanceClass = extensionInstanceClassMap.get(extensionInstanceName);
             if (instanceClass != null) {
                 return (Class<T>) instanceClass;
             }
